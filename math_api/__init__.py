@@ -10,7 +10,7 @@ from jwt.exceptions import DecodeError
 from datetime import timedelta
 
 def create_app():
-    app = Flask(__name__, static_folder='build', static_url_path='/', instance_relative_config=True)
+    app = Flask(__name__, static_folder='../build', static_url_path='/', instance_relative_config=True)
     CORS(app)
 
     initialize_db_for_app(app)
