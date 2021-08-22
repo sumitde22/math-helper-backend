@@ -17,12 +17,17 @@ def create_app():
     
     app.config["SECRET_KEY"] = os.environ['SECRET']
     app.config["JWT_SECRET_KEY"] = os.environ['SECRET']
+    app.config["DATABASE_URL"] = os.environ['DATABASE_URL']
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
     app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
     jwt.init_app(app)
 
     @app.route('/')
     def index():
+        return app.send_static_file('index.html')
+    
+    @app.errorhandler(404)
+    def not_found(e):
         return app.send_static_file('index.html')
 
     app.register_blueprint(auth_blueprint)
@@ -31,7 +36,6 @@ def create_app():
 
     app.register_error_handler(400, generate_error_handler(400))
     app.register_error_handler(401, generate_error_handler(401))
-    app.register_error_handler(404, generate_error_handler(404))
     app.register_error_handler(405, generate_error_handler(405))
     app.register_error_handler(409, generate_error_handler(409))
     app.register_error_handler(DecodeError, token_parse_error)

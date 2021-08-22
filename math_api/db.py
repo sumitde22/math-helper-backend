@@ -5,7 +5,7 @@ from flask.cli import with_appcontext
 
 def get_db_connection():
     if 'db' not in g:
-        connection = psycopg2.connect(host="localhost", database="math_app_database", user="math_app_user", password="CR7madridjayriehayford18")
+        connection = psycopg2.connect(current_app.config["DATABASE_URL"], sslmode='require')
         connection.set_session(autocommit=True)
         g.db = connection
     return g.db
