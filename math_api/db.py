@@ -5,7 +5,10 @@ from flask.cli import with_appcontext
 
 def get_db_connection():
     if 'db' not in g:
-        connection = psycopg2.connect(current_app.config["DATABASE_URL"], sslmode='require')
+        if current_app.config["FLASK_ENV"] == "development":
+            connection = psycopg2.connect(current_app.config["DATABASE_URL"])
+        else:
+            connection = psycopg2.connect(current_app.config["DATABASE_URL"], sslmode='require')
         connection.set_session(autocommit=True)
         g.db = connection
     return g.db
