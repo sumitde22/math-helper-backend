@@ -6,4 +6,6 @@ Based off of spaced repetition and active recall concepts from Anki.
 
 This repo contains backend api to store user info and solve problems, and front-end build. See math-helper-frontend for frontend code
 
+![Image of Main Page](https://github.com/sumitde22/math-helper-backend/blob/main/homepage.png)
+
 Try it here: https://calc-buddy.herokuapp.com/
