@@ -59,7 +59,7 @@ begin
   if NOT EXISTS (SELECT 1 FROM daily_assignment WHERE user_id=user_id_param) then
     INSERT INTO daily_assignment (problem_id, user_id, date, solved) 
     SELECT problem_id, user_id, CURRENT_DATE, false FROM interval_calculation_info WHERE earliest_calculated_due_date <= CURRENT_DATE AND user_id = user_id_param 
-    ORDER BY earliest_calculated_due_date, current_streak LIMIT max_questions;
+    ORDER BY earliest_calculated_due_date, correct_streak LIMIT max_questions;
   end if;
   commit;
 end;
