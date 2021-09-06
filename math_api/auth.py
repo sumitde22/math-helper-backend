@@ -24,8 +24,8 @@ def create_user(username, password):
     try:
         db_connection = get_db_connection()
         cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-        # call defined function (see util.sql for definition)
-        cursor.execute('SELECT * FROM create_user( %s , %s );', (username, generate_password_hash(password)))
+        # try insert, raise error if it doesn't work
+        cursor.execute('INSERT INTO user_info(username, password_hash) VALUES (%s, %s) RETURNING user_info.id, user_info.username;', (username, generate_password_hash(password)))
         user = cursor.fetchone()
         return user
     except Error:

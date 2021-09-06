@@ -23,8 +23,9 @@ def assign_daily_problems(user_id):
 def get_problems_assigned_today(user_id):
     db_connection = get_db_connection()
     cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-    cursor.execute('SELECT problem_set.* FROM daily_assignment INNER JOIN problem_set ON daily_assignment.problem_id = problem_set.id ' 
-    'WHERE date=CURRENT_DATE AND user_id=%s AND solved=false ORDER BY problem_set.id;', (user_id,))
+    cursor.execute('SELECT problem_info.id, problem_info.problem_latex, problem_info.sample_solution_latex, problem_info.assumptions_latex, problem_info.expression_type '
+    'FROM daily_assignment INNER JOIN problem_info ON daily_assignment.problem_id = problem_info.id ' 
+    'WHERE date=CURRENT_DATE AND user_id=%s AND solved=false ORDER BY problem_info.id;', (user_id,))
     todays_problems = cursor.fetchall()
     cursor.close()
     return todays_problems
@@ -33,7 +34,7 @@ def get_problems_assigned_today(user_id):
 def get_problems():
     db_connection = get_db_connection()
     cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-    cursor.execute('SELECT * FROM problem_set ORDER BY id;')
+    cursor.execute('SELECT id, problem_latex, sample_solution_latex, assumptions_latex, expression_type FROM problem_info ORDER BY id;')
     problems = cursor.fetchall()
     cursor.close()
     return problems
@@ -42,11 +43,9 @@ def get_problems():
 def get_problems_with_statistics(user_id):
     db_connection = get_db_connection()
     cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-    cursor.execute('SELECT DISTINCT problem_set.*, '
-    'COUNT(*) filter(where user_attempt_log.correct and user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS solved, '
-    'COUNT(*) filter(where user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS attempts, '
-    'MAX(attempt_date) filter(where user_attempt_log.correct and user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS most_recent_solved '
-    'FROM problem_set LEFT JOIN user_attempt_log ON problem_set.id = user_attempt_log.problem_id ORDER BY problem_set.id;', (user_id, user_id, user_id))
+    cursor.execute('SELECT problem_info.id, problem_info.problem_latex, problem_info.sample_solution_latex, problem_info.assumptions_latex, problem_info.expression_type, '
+    'interval_calculation_info.correct_streak, interval_calculation_info.earliest_calculated_due_date '
+    'FROM problem_info INNER JOIN interval_calculation_info ON problem_info.id = interval_calculation_info.problem_id AND interval_calculation_info.user_id=%s ORDER BY problem_info.id;', (user_id,))
     problems = cursor.fetchall()
     cursor.close()
     return problems
@@ -55,7 +54,7 @@ def get_problems_with_statistics(user_id):
 def get_problem(problem_id):
     db_connection = get_db_connection()
     cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-    cursor.execute('SELECT * FROM problem_set WHERE id=%s;', (problem_id,))
+    cursor.execute('SELECT id, problem_latex, sample_solution_latex, assumptions_latex, expression_type FROM problem_info WHERE id=%s;', (problem_id,))
     problem = cursor.fetchone()
     cursor.close()
     return problem
@@ -64,14 +63,68 @@ def get_problem(problem_id):
 def get_problem_with_statistics(user_id, problem_id):
     db_connection = get_db_connection()
     cursor = db_connection.cursor(cursor_factory=RealDictCursor)
-    cursor.execute('SELECT DISTINCT problem_set.*, '
-    'COUNT(*) filter(where user_attempt_log.correct and user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS solved, '
-    'COUNT(*) filter(where user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS attempts, '
-    'MAX(attempt_date) filter(where user_attempt_log.correct and user_attempt_log.user_id=%s) OVER (PARTITION BY user_attempt_log.problem_id) AS most_recent_solved '
-    'FROM problem_set LEFT JOIN user_attempt_log ON problem_set.id = user_attempt_log.problem_id WHERE problem_set.id = %s;', (user_id, user_id, user_id, problem_id))
+    cursor.execute('SELECT problem_info.id, problem_info.problem_latex, problem_info.sample_solution_latex, problem_info.assumptions_latex, problem_info.expression_type, '
+    'COUNT(user_attempt_log.correct) filter(where user_attempt_log.correct) AS solved, '
+    'COUNT(user_attempt_log.response) AS attempts, '
+    'MAX(user_attempt_log.attempt_date) AS most_recent_solved '
+    'FROM problem_info LEFT JOIN user_attempt_log ON problem_info.id = user_attempt_log.problem_id AND user_attempt_log.user_id=%s WHERE problem_info.id = %s '
+    'GROUP BY problem_info.id, problem_info.problem_latex, problem_info.sample_solution_latex, problem_info.assumptions_latex, problem_info.expression_type;', (user_id, problem_id))
     problem = cursor.fetchone()
     cursor.close()
     return problem
+
+# get all assumptions 
+def get_problem_assumptions(problem_id):
+    db_connection = get_db_connection()
+    cursor = db_connection.cursor()
+    cursor.execute('SELECT representation, sympy_assumption FROM problem_info_sympy WHERE problem_id=%s AND sympy_assumption IS NOT NULL;', (problem_id,))
+    assumptions = cursor.fetchall()
+    cursor.close()
+
+    sympy_assumptions = {}
+    for row in assumptions:
+        sympy_assumptions[row[0]] = parse_expr(row[1])
+    return sympy_assumptions
+
+def compare_problem_to_answer(problem_id, answer_expression, assumptions):
+    db_connection = get_db_connection()
+    cursor = db_connection.cursor()
+    cursor.execute("SELECT representation FROM problem_info_sympy WHERE problem_id=%s AND info_type='problem'; ", (problem_id,))
+    sympy_problem_string = cursor.fetchone()[0]
+    cursor.execute("SELECT expression_type FROM problem_info WHERE id=%s;", (problem_id,))
+    problem_type = cursor.fetchone()[0]
+    cursor.close()
+
+    problem_expression = parse_expr(sympy_problem_string, assumptions, evaluate=False)
+    if problem_expression == answer_expression:
+        raise RuntimeError('Answer matches problem symbolically. Please answer with simplified version of problem')
+    
+    # if problem is derivative/integral, execute operation
+    if problem_type == 'derivative' or problem_type == 'integral':
+        problem_expression = problem_expression.doit()
+
+    # simplify both problem and user response as much as possible
+    sympy_user_comparison = (problem_expression - answer_expression).simplify()
+    while sympy_user_comparison != sympy_user_comparison.simplify():
+        sympy_user_comparison = sympy_user_comparison.simplify()
+    # if user submits answer that is mathematically equal to problem, log it as correct and inform user that it is correct
+    return sympy_user_comparison == 0
+
+def compare_solutions_to_answer(problem_id, answer_expression, assumptions):
+    db_connection = get_db_connection()
+    cursor = db_connection.cursor()
+    cursor.execute("SELECT representation FROM problem_info_sympy WHERE problem_id=%s AND info_type='sample_solution'; ", (problem_id,))
+    sympy_solution_strings = cursor.fetchall()
+    solution_expressions = list(map(lambda r: parse_expr(r[0], assumptions), sympy_solution_strings))
+    cursor.close()
+
+    for solution_expression in solution_expressions:
+        sympy_user_comparison = (solution_expression - answer_expression).simplify()
+        while sympy_user_comparison != sympy_user_comparison.simplify():
+            sympy_user_comparison = sympy_user_comparison.simplify()
+        if sympy_user_comparison == 0:
+            return True
+    return False
 
 # erase all attempts for given problem and user from history
 def reset_problem(user_id, problem_id):
@@ -106,47 +159,24 @@ def solve_problem(problem_id):
 
     # load algebraic assumptions about symbols used in problem
     # e.g. assuming x is real or y is an integer
-    sympy_assumptions = {} if problem['assumptions_json'] == None else loads(problem['assumptions_json'])
-    for key in sympy_assumptions:
-        sympy_assumptions[key] = parse_expr(sympy_assumptions[key])
-
+    sympy_assumptions = get_problem_assumptions(problem_id)
+    
     # try to parse user response algebraically, throw error if sympy cannot create valid expression
     try:
         answer_expression = parse_expr(answer, sympy_assumptions)
     except Exception:
         abort(400, f'Answer did not follow correct format and could not be parsed. Please resubmit')
 
-    # process 1: check to see if user response is mathematically equal to solved version of problem
+    try:
+        correct_check_one = compare_problem_to_answer(problem_id, answer_expression, sympy_assumptions)
+        if correct_check_one:
+            log_response(user_id, problem_id, True, answer)
+            return {'sample_solution': problem['sample_solution_latex'], 'correct': True}
+    except RuntimeError as error:
+        abort(400, str(error))
 
-    problem_expression = parse_expr(problem['sympy_rep'], sympy_assumptions, evaluate=False)
-    # make sure user provides some simplification of problem and doesn't just resubmit problem
-    if problem_expression == answer_expression:
-        abort(400, f'Answer matches problem symbolically. Please answer with simplified version of problem')
-    
-    # if problem is derivative/integral, execute operation
-    if problem['expression_type'] == 'derivative' or problem['expression_type'] == 'integral':
-        problem_expression = problem_expression.doit()
-
-    # simplify both problem and user response as much as possible
-    sympy_user_comparison = (problem_expression - answer_expression).simplify()
-    while sympy_user_comparison != sympy_user_comparison.simplify():
-        sympy_user_comparison = sympy_user_comparison.simplify()
-    # if user submits answer that is mathematically equal to problem, log it as correct and inform user that it is correct
-    if sympy_user_comparison == 0:
-        # logging the response will trigger another function that will calculate when to next assign this problem
-        # see schedule_next_assignment in util.sql
-        log_response(user_id, problem_id, True, answer)
-        return {'sample_solution': problem['sample_solution_latex'], 'correct': True}
-
-    # process 2: if sympy doesn't determine problem and user response to be mathematically equivalent,
-    # check to see if user response is equal to a sample solution for that problem
-    solution_expression = parse_expr(problem['sample_solution_sympy'], sympy_assumptions)
-    # simplify both solution and user response as much as possible
-    sample_solution_user_comparison = (solution_expression - answer_expression).simplify()
-    while sample_solution_user_comparison != sample_solution_user_comparison.simplify():
-        sympy_user_comparison = sympy_user_comparison.simplify()
-    # if user submits answer that is mathematically equal to sample solution, log it as correct and inform user that it is correct
-    if sample_solution_user_comparison == 0:
+    correct_check_two = compare_solutions_to_answer(problem_id, answer_expression, sympy_assumptions)
+    if correct_check_two:
         # logging the response will trigger another function that will calculate when to next assign this problem
         # see schedule_next_assignment in util.sql
         log_response(user_id, problem_id, True, answer)

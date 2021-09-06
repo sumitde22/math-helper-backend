@@ -1,13 +1,3 @@
-create or replace function create_user(username_to_add VARCHAR(255), password_hash_to_add VARCHAR(255) )
-returns table (id int, username VARCHAR(255))
-language plpgsql
-as
-$$
-begin
-  RETURN QUERY INSERT INTO user_info(username, password_hash) VALUES (username_to_add, password_hash_to_add) RETURNING user_info.id, user_info.username;
-end;
-$$;
-
 create or replace procedure delete_user(user_id_param int) 
 language plpgsql
 as 
@@ -30,7 +20,7 @@ declare
 begin
   DELETE FROM user_attempt_log WHERE user_id = user_id_param;
   DELETE FROM daily_assignment WHERE user_id = user_id_param;
-  UPDATE interval_calculation_info SET correct_streak = 0, last_graduated_interval = NULL, earliest_calculated_due_date = CURRENT_DATE + 1 + (problem_id / max_questions) WHERE user_id = user_id_param;
+  UPDATE interval_calculation_info SET correct_streak = 0, last_graduated_interval = NULL, earliest_calculated_due_date = CURRENT_DATE + 1 + ((problem_id - 1) / max_questions) WHERE user_id = user_id_param;
   commit;
 end;
 $$; 
@@ -43,7 +33,7 @@ $$
 declare
   max_questions constant int := 10;
 begin
-  INSERT INTO interval_calculation_info(problem_id, user_id, correct_streak, earliest_calculated_due_date) SELECT problem_set.id, NEW.id, 0, CURRENT_DATE + (problem_set.id / max_questions) FROM problem_set;
+  INSERT INTO interval_calculation_info(problem_id, user_id, correct_streak, earliest_calculated_due_date) SELECT problem_info.id, NEW.id, 0, CURRENT_DATE + ((problem_info.id - 1) / max_questions) FROM problem_info;
   RETURN NEW;
 end;
 $$;
@@ -59,7 +49,7 @@ begin
   if NOT EXISTS (SELECT 1 FROM daily_assignment WHERE user_id=user_id_param) then
     INSERT INTO daily_assignment (problem_id, user_id, date, solved) 
     SELECT problem_id, user_id, CURRENT_DATE, false FROM interval_calculation_info WHERE earliest_calculated_due_date <= CURRENT_DATE AND user_id = user_id_param 
-    ORDER BY earliest_calculated_due_date, correct_streak LIMIT max_questions;
+    ORDER BY earliest_calculated_due_date, correct_streak, problem_id LIMIT max_questions;
   end if;
   commit;
 end;
